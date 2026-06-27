@@ -36,7 +36,10 @@ export const AgentStateAnnotation = Annotation.Root({
     reducer: (current, update) => [...(current || []), ...update],
     default: () => [],
   }),
-  currentStep: Annotation<string | undefined>(),
+  currentStep: Annotation<string | undefined>({
+    reducer: (_, update) => update,
+    default: () => undefined,
+  }),
 
   // User-provided API keys (passed from frontend)
   userGoogleKey: Annotation<string | undefined>(),
