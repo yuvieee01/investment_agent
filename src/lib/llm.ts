@@ -17,7 +17,7 @@ function createGeminiLLM(apiKey?: string) {
   if (!key) return null;
 
   return new ChatGoogleGenerativeAI({
-    model: "gemini-2.5-flash",
+    model: "gemini-3-flash-preview",
     apiKey: key,
     temperature: 0.3,
     maxOutputTokens: 8192,
@@ -26,14 +26,14 @@ function createGeminiLLM(apiKey?: string) {
 
 /**
  * Creates a Groq LLM instance (fallback).
- * Uses llama-3.3-70b-versatile — fast and capable.
+ * Uses llama-3.1-8b-instant — fast and capable.
  */
 function createGroqLLM(apiKey?: string) {
   const key = apiKey || process.env.GROQ_API_KEY;
   if (!key) return null;
 
   return new ChatGroq({
-    model: "llama-3.3-70b-versatile",
+    model: "llama-3.1-8b-instant",
     apiKey: key,
     temperature: 0.3,
     maxTokens: 8192,
@@ -41,12 +41,56 @@ function createGroqLLM(apiKey?: string) {
 }
 
 /**
- * Rate-limit-aware LLM wrapper with Groq fallback.
- *
- * Strategy:
- * 1. Try Gemini first
- * 2. On 429 rate limit → immediately switch to Groq (no waiting)
- * 3. If Groq also fails → retry Gemini once after a delay
+ * Wraps an LLM with exponential backoff for rate limits.
+ */
+function withExponentialBackoff(llm: any, providerName: string) {
+  return {
+    async invoke(
+      messages: BaseMessage[] | { role: string; content: string }[]
+    ): Promise<AIMessageChunk> {
+      const maxRetries = 4;
+      let lastError: Error | null = null;
+
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          return await llm.invoke(messages);
+        } catch (error: unknown) {
+          lastError = error instanceof Error ? error : new Error(String(error));
+          const errorMsg = lastError.message;
+
+          if (
+            errorMsg.includes("429") ||
+            errorMsg.includes("quota") ||
+            errorMsg.includes("rate limit") ||
+            errorMsg.includes("Too Many Requests")
+          ) {
+            const baseDelay = 10000 * Math.pow(2, attempt); // 10s, 20s, 40s, 80s
+            const jitter = Math.random() * 2000;
+            const delay = baseDelay + jitter;
+
+            console.log(
+              `[LLM - ${providerName}] Rate limited (attempt ${
+                attempt + 1
+              }/${maxRetries}). Retrying in ${Math.round(delay / 1000)}s...`
+            );
+            await sleep(delay);
+          } else {
+            // Not a rate limit error, throw immediately
+            throw lastError;
+          }
+        }
+      }
+
+      throw (
+        lastError ||
+        new Error(`[LLM - ${providerName}] Failed after ${maxRetries} retries.`)
+      );
+    }
+  };
+}
+
+/**
+ * Rate-limit-aware LLM wrapper with exponential backoff and Groq fallback.
  */
 export function createLLM(apiKey?: string) {
   const gemini = createGeminiLLM(apiKey);
@@ -58,65 +102,37 @@ export function createLLM(apiKey?: string) {
     );
   }
 
+  const geminiWithBackoff = gemini
+    ? withExponentialBackoff(gemini, "Gemini")
+    : null;
+  const groqWithBackoff = groq ? withExponentialBackoff(groq, "Groq") : null;
+
   return {
     async invoke(
       messages: BaseMessage[] | { role: string; content: string }[]
     ): Promise<AIMessageChunk> {
       // Try Gemini first
-      if (gemini) {
+      if (geminiWithBackoff) {
         try {
-          return await gemini.invoke(messages);
+          return await geminiWithBackoff.invoke(messages);
         } catch (error: unknown) {
-          const errorMsg =
-            error instanceof Error ? error.message : String(error);
-
-          if (
-            errorMsg.includes("429") ||
-            errorMsg.includes("quota") ||
-            errorMsg.includes("rate")
-          ) {
-            console.log(
-              "[LLM] Gemini rate limited → switching to Groq fallback"
-            );
-            // Fall through to Groq below
-          } else {
-            // Non-rate-limit error — try Groq as general fallback
-            console.log(
-              `[LLM] Gemini error: ${errorMsg.slice(0, 100)} → trying Groq`
-            );
-          }
+          console.log(
+            `[LLM] Gemini failed after retries: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+          if (!groqWithBackoff) throw error; // No fallback available
+          console.log("[LLM] Switching to Groq fallback...");
         }
       }
 
-      // Groq fallback
-      if (groq) {
-        try {
-          return await groq.invoke(messages);
-        } catch (error: unknown) {
-          const errorMsg =
-            error instanceof Error ? error.message : String(error);
-          console.log(`[LLM] Groq also failed: ${errorMsg.slice(0, 100)}`);
-
-          // If Groq also fails and we have Gemini, retry once after delay
-          if (gemini) {
-            console.log("[LLM] Retrying Gemini after 60s cooldown...");
-            await sleep(60000);
-            return await gemini.invoke(messages);
-          }
-
-          throw error;
-        }
-      }
-
-      // If only Gemini (no Groq), retry with backoff
-      if (gemini) {
-        console.log("[LLM] No Groq fallback. Retrying Gemini after 60s...");
-        await sleep(60000);
-        return await gemini.invoke(messages);
+      // Try Groq fallback
+      if (groqWithBackoff) {
+        return await groqWithBackoff.invoke(messages);
       }
 
       throw new Error("No LLM available");
-    },
+    }
   };
 }
 
