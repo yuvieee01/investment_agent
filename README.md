@@ -31,7 +31,7 @@ The entire pipeline streams results to the frontend in real time via Server-Sent
 
 ```bash
 # 1. Clone the repo
-git clone <repo-url>
+git clone https://github.com/yuvieee01/investment_agent
 cd investment_agent
 
 # 2. Install dependencies
