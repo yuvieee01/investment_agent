@@ -257,6 +257,17 @@ Tavily provides clean, structured search results optimized for LLMs. Building a 
 
 ---
 
+## LLM Chat Transcripts
+
+This project was built entirely with AI assistance. The full chat transcripts from every LLM session used during development are included in [`docs/LLM_Chat_Transcripts/`](docs/LLM_Chat_Transcripts/) for complete transparency into the thought process, design decisions, and iterative debugging that shaped the final product.
+
+The transcripts cover:
+- **Tech stack planning** — Evaluating React vs Next.js, LangChain vs LangGraph, and choosing the right architecture.
+- **Implementation sessions** — Building the agent graph, frontend components, SSE streaming, and debugging rate-limit issues.
+- **Instruction plan** — The original implementation plan used to guide development.
+
+---
+
 ## Project Structure
 
 ```
@@ -286,7 +297,9 @@ investment_agent/
 │               ├── researchIndustry.ts   # Industry trends research
 │               ├── analyzeAll.ts         # Synthesize all research
 │               └── makeDecision.ts       # Final investment decision
-├── docs/screenshots/                # Example run screenshots
+├── docs/
+│   ├── screenshots/                 # Example run screenshots
+│   └── LLM_Chat_Transcripts/        # Full AI chat logs from development
 ├── .env.local                       # API keys (not committed)
 ├── package.json
 └── README.md
